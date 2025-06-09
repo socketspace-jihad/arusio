@@ -40,17 +40,25 @@ func main() {
 		payload := make([]byte, 8)
 		_, err := io.ReadFull(conn, payload)
 		if err != nil {
-			log.Fatal().Msg(err.Error())
+			if err != io.EOF {
+				log.Err(err).Msg("failed to read the payload length")
+				break
+			}
 		}
 
 		payloadLength := binary.BigEndian.Uint64(payload)
 		data := make([]byte, payloadLength)
 		_, err = io.ReadFull(conn, data)
 		if err != nil {
-			log.Fatal().Msg(err.Error())
+			if err != io.EOF {
+				log.Err(err).Msg("failed to read the payload")
+				break
+			}
 		}
 		if string(data) != "" {
 			log.Print(string(data))
 		}
 	}
+
+	conn.Write([]byte("__BYE__"))
 }

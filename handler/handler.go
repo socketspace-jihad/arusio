@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 
@@ -12,8 +13,9 @@ import (
 )
 
 var (
-	connectionPool = make(chan *Connection, 1024)
-	NUM_WORKER     = 5
+	connectionPool          = make(chan *Connection, 1024)
+	NUM_WORKER              = 5
+	errReadLengthBuff error = errors.New("error read length buffer")
 )
 
 func handle(conn *Connection, id int) {
@@ -27,37 +29,37 @@ func handle(conn *Connection, id int) {
 	for {
 		// Read topic length (4 bytes)
 		if _, err := io.ReadFull(conn.reader, topicLenBuf[:]); err != nil {
-			log.Print("read topic length:", err)
+			log.Err(errReadLengthBuff)
 			return
 		}
 		topicLen := binary.BigEndian.Uint32(topicLenBuf[:])
 
 		// Guard against unreasonable topic length
 		if topicLen == 0 || topicLen > 1<<20 {
-			log.Print("invalid topic length")
+			log.Err(errReadLengthBuff)
 			return
 		}
 
 		topic := make([]byte, topicLen)
 		if _, err := io.ReadFull(conn.reader, topic); err != nil {
-			log.Print("read topic:", err)
+			log.Err(errReadLengthBuff)
 			return
 		}
 
 		if _, err := io.ReadFull(conn.reader, payloadLenBuf[:]); err != nil {
-			log.Print("read payload length:", err)
+			log.Err(errReadLengthBuff)
 			return
 		}
 		payloadLen := binary.BigEndian.Uint64(payloadLenBuf[:])
 
 		if payloadLen == 0 || payloadLen > 1<<30 {
-			log.Print("invalid payload length")
+			log.Err(errReadLengthBuff)
 			return
 		}
 
 		payload := make([]byte, payloadLen)
 		if _, err := io.ReadFull(conn.reader, payload); err != nil {
-			log.Print("read payload:", err)
+			log.Err(errReadLengthBuff)
 			return
 		}
 
@@ -68,7 +70,7 @@ func handle(conn *Connection, id int) {
 			PayloadLength: payloadLen,
 		}
 		if err := broker.Publish(msg); err != nil {
-			log.Printf("publish error: %v (worker id: %d)", err, id)
+			log.Err(err).Int("worker_id", id).Msg("error sending message")
 			return
 		}
 	}
@@ -89,7 +91,7 @@ func Serve(addr string) {
 	for i := 0; i < NUM_WORKER; i++ {
 		go worker(i)
 	}
-	log.Print("Listening at", addr)
+	log.Info().Str("addr", addr).Msg("publisher is listening on")
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
