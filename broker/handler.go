@@ -11,6 +11,7 @@ import (
 
 var (
 	errReadingBuff error = errors.New("error reading buff")
+	NUM_WORKER           = 50
 )
 
 func worker(id int) {

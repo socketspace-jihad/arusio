@@ -7,7 +7,6 @@ import (
 )
 
 var (
-	NUM_WORKER      = 5
 	brokerEventPool = make(chan *message.Message, 1024)
 	consumerPool    = make(map[string]*ConnectionPool)
 )
@@ -21,19 +20,19 @@ func getConsumers(data string) (*ConnectionPool, error) {
 
 func registerConsumers(topic string, consumerGroup string, conn *Connection) {
 	if _, ok := consumerPool[topic]; !ok {
-		consumerPool[topic] = NewConnectionPool(conn)
-		consumerPool[topic].add(conn, consumerGroup)
+		consumerPool[topic] = NewConnectionPool(conn, topic)
+		consumerPool[topic].add(conn, consumerGroup, consumerPool[topic])
 		return
 	}
 	if consumerPool[topic] == nil {
-		consumerPool[topic] = NewConnectionPool(conn)
-		consumerPool[topic].add(conn, consumerGroup)
+		consumerPool[topic] = NewConnectionPool(conn, topic)
+		consumerPool[topic].add(conn, consumerGroup, consumerPool[topic])
 		return
 	}
 	if _, ok := consumerPool[topic].consumerGroups[consumerGroup]; !ok {
-		consumerPool[topic].consumerGroups[consumerGroup] = NewConsumerGroup()
+		consumerPool[topic].consumerGroups[consumerGroup] = NewConsumerGroup(consumerGroup)
 	}
-	consumerPool[topic].consumerGroups[consumerGroup].add(conn)
+	consumerPool[topic].consumerGroups[consumerGroup].add(conn, consumerPool[topic])
 }
 
 func Publish(data *message.Message) error {

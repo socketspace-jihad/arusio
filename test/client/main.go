@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -45,8 +46,12 @@ func main() {
 		copy(msgBuff[4:4+topicLength], msg.Topic)
 		binary.BigEndian.PutUint64(msgBuff[4+topicLength:4+topicLength+8], uint64(len(text)))
 		copy(msgBuff[4+topicLength+8:], msg.Payload)
-
-		_, err = conn.Write(msgBuff)
+		tick := time.NewTicker(1 * time.Second)
+		for range tick.C {
+			for i := 0; i < 100_000; i++ {
+				_, err = conn.Write(msgBuff)
+			}
+		}
 
 		if err != nil {
 			panic(err)
