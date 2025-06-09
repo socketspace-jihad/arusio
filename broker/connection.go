@@ -7,16 +7,16 @@ import (
 )
 
 type Connection struct {
-	conn     net.Conn
-	reader   io.Reader
+	Conn     net.Conn
+	Reader   io.Reader
 	doneChan chan struct{}
 	open     bool
 }
 
 func NewConnection(conn net.Conn) *Connection {
 	return &Connection{
-		conn:     conn,
-		reader:   bufio.NewReader(conn),
+		Conn:     conn,
+		Reader:   bufio.NewReader(conn),
 		open:     true,
 		doneChan: make(chan struct{}),
 	}

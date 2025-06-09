@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -28,6 +27,12 @@ func main() {
 	topic := []byte("topic-1")
 	topicLength := len(topic)
 
+	msgBuff := make([]byte, 4+topicLength)
+	binary.BigEndian.PutUint32(msgBuff[:4], uint32(topicLength))
+	copy(msgBuff[4:4+topicLength], topic)
+	_, err = conn.Write(msgBuff)
+	log.Print("Sending to register topic")
+
 	for {
 		fmt.Print("->")
 		text, _ := reader.ReadBytes('\n')
@@ -46,12 +51,7 @@ func main() {
 		copy(msgBuff[4:4+topicLength], msg.Topic)
 		binary.BigEndian.PutUint64(msgBuff[4+topicLength:4+topicLength+8], uint64(len(text)))
 		copy(msgBuff[4+topicLength+8:], msg.Payload)
-		tick := time.NewTicker(1 * time.Second)
-		for range tick.C {
-			for i := 0; i < 100_000; i++ {
-				_, err = conn.Write(msgBuff)
-			}
-		}
+		_, err = conn.Write(msgBuff)
 
 		if err != nil {
 			panic(err)

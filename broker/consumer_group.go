@@ -32,13 +32,13 @@ func (cg *ConsumerGroup) add(conn *Connection, connPool *ConnectionPool) {
 	cg.mtx.Lock()
 	cg.connections = append(cg.connections, conn)
 	go func(cg *ConsumerGroup) {
-		_, err := io.ReadAll(conn.reader)
+		_, err := io.ReadAll(conn.Reader)
 		cg.mtx.Lock()
 		defer cg.mtx.Unlock()
 		if err != nil {
 			log.Err(err).Msg("error when reading heartbeat from client ..")
 		}
-		conn.conn.Close()
+		conn.Conn.Close()
 		cg.connections = append(cg.connections[:cg.targetIdx], cg.connections[cg.targetIdx+1:]...)
 		if len(cg.connections) == 0 {
 			delete(consumerPool[connPool.topicName].consumerGroups, cg.name)
@@ -60,10 +60,10 @@ func (cg *ConsumerGroup) send(data []byte) error {
 	conn := cg.connections[cg.targetIdx]
 
 	var err error
-	_, err = conn.conn.Write(data)
+	_, err = conn.Conn.Write(data)
 	if err != nil {
 		log.Print(err)
-		conn.conn.Close()
+		conn.Conn.Close()
 		cg.connections = append(cg.connections[:cg.targetIdx], cg.connections[cg.targetIdx+1:]...)
 		if len(cg.connections) == 0 {
 			delete(consumerPool[cg.ConnectionPool.topicName].consumerGroups, cg.name)

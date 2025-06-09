@@ -13,22 +13,42 @@ import (
 )
 
 var (
-	connectionPool          = make(chan *Connection, 1024)
+	connectionPool          = make(chan *broker.Connection, 1024)
 	NUM_WORKER              = 5
 	errReadLengthBuff error = errors.New("error read length buffer")
 )
 
-func handle(conn *Connection, id int) {
-	defer conn.conn.Close()
+func handle(conn *broker.Connection, id int) {
+	defer conn.Conn.Close()
 
 	var (
 		topicLenBuf   [4]byte
 		payloadLenBuf [8]byte
 	)
+	if _, err := io.ReadFull(conn.Reader, topicLenBuf[:]); err != nil {
+		log.Err(errReadLengthBuff)
+		return
+	}
+	topicLen := binary.BigEndian.Uint32(topicLenBuf[:])
+
+	// Guard against unreasonable topic length
+	if topicLen == 0 || topicLen > 1<<20 {
+		log.Err(errReadLengthBuff)
+		return
+	}
+
+	topic := make([]byte, topicLen)
+	if _, err := io.ReadFull(conn.Reader, topic); err != nil {
+		log.Err(errReadLengthBuff)
+		return
+	}
+
+	log.Print("producer registered to topic ", string(topic))
+	broker.RegisterProducertoTopic(broker.NewConnection(conn.Conn), string(topic))
 
 	for {
 		// Read topic length (4 bytes)
-		if _, err := io.ReadFull(conn.reader, topicLenBuf[:]); err != nil {
+		if _, err := io.ReadFull(conn.Reader, topicLenBuf[:]); err != nil {
 			log.Err(errReadLengthBuff)
 			return
 		}
@@ -41,12 +61,12 @@ func handle(conn *Connection, id int) {
 		}
 
 		topic := make([]byte, topicLen)
-		if _, err := io.ReadFull(conn.reader, topic); err != nil {
+		if _, err := io.ReadFull(conn.Reader, topic); err != nil {
 			log.Err(errReadLengthBuff)
 			return
 		}
 
-		if _, err := io.ReadFull(conn.reader, payloadLenBuf[:]); err != nil {
+		if _, err := io.ReadFull(conn.Reader, payloadLenBuf[:]); err != nil {
 			log.Err(errReadLengthBuff)
 			return
 		}
@@ -58,7 +78,7 @@ func handle(conn *Connection, id int) {
 		}
 
 		payload := make([]byte, payloadLen)
-		if _, err := io.ReadFull(conn.reader, payload); err != nil {
+		if _, err := io.ReadFull(conn.Reader, payload); err != nil {
 			log.Err(errReadLengthBuff)
 			return
 		}
@@ -97,6 +117,6 @@ func Serve(addr string) {
 		if err != nil {
 			panic(err)
 		}
-		connectionPool <- NewConnection(conn)
+		connectionPool <- broker.NewConnection(conn)
 	}
 }

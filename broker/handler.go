@@ -31,7 +31,7 @@ func worker(id int) {
 					switch err {
 					case errNoConnectionsAvailable:
 						log.Print("err no connections available")
-						break
+						return
 					default:
 						log.Print("error to specific connection, retrying to another node")
 						copy(data[8:], payload)
