@@ -2,6 +2,7 @@ package broker
 
 import (
 	"errors"
+	"io"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -45,11 +46,12 @@ func RegisterConsumertoTopic(cg *ConsumerGroup, topicName string) (*topic, error
 }
 
 type Partition struct {
-	ID             uint
-	Data           chan []byte
-	errChan        chan error
-	doneChan       chan struct{}
-	ConsumerGroups map[string]*ConsumerGroup
+	ID              uint
+	Data            chan []byte
+	errChan         chan error
+	doneChan        chan struct{}
+	killingConsumer chan *ConsumerGroup
+	ConsumerGroups  map[string]*ConsumerGroup
 }
 
 func NewPartition(bufferCap uint32, ID uint) Partition {
@@ -62,41 +64,51 @@ func NewPartition(bufferCap uint32, ID uint) Partition {
 	}
 }
 
-func (p *Partition) registerNewConsumer(cg *ConsumerGroup) error {
+func (p *Partition) registerNewConsumer(t *topic, cg *ConsumerGroup) error {
+	log.Print("registering consumer", cg)
 	p.ConsumerGroups[cg.name] = cg
-	go func(partition *Partition) {
-		for payload := range partition.Data {
-			for _, cg := range partition.ConsumerGroups {
-				log.Print("sending ", string(payload), " from ", p.ID, " listener ", cg)
-				_, err := cg.connections[0].Conn.Write(payload)
-				if err != nil {
-					log.Err(err).Msg("error when sending message")
-				}
-			}
-		}
+	t.cgConnectionBoundCounter[cg][cg.connections[0]]++
+	go func(t *topic, partition *Partition) {
 		for {
 			select {
 			case payload := <-partition.Data:
 				for _, cg := range partition.ConsumerGroups {
-					log.Print("sending ", string(payload), " from ", p.ID, " listener ", cg)
 					_, err := cg.connections[0].Conn.Write(payload)
 					if err != nil {
 						log.Err(err).Msg("error when sending message")
 					}
 				}
 			case <-p.doneChan:
-				log.Print("end of the data")
+				for _, cg := range partition.ConsumerGroups {
+					for _, connection := range cg.connections {
+						connection.Conn.Close()
+					}
+					delete(partition.ConsumerGroups, cg.name)
+				}
+				return
+			case err := <-p.errChan:
+				log.Err(err)
+			case cg := <-p.killingConsumer:
+				t.Mutex.Lock()
+				delete(p.ConsumerGroups, cg.name)
+				delete(t.cgConnectionBoundCounter[cg], cg.connections[0])
+				t.cgCounter[cg.name]--
+				t.Mutex.Unlock()
 			}
 		}
-	}(p)
-	return nil
-}
-
-func (p *Partition) registerExistingConsumer(cg *ConsumerGroup) error {
-	if _, ok := p.ConsumerGroups[cg.name]; !ok {
-		p.ConsumerGroups[cg.name] = cg
-	} else {
-		p.ConsumerGroups[cg.name].connections = append(p.ConsumerGroups[cg.name].connections, cg.connections...)
+	}(t, p)
+	for _, consumer := range p.ConsumerGroups {
+		go func(partition *Partition, consumer *ConsumerGroup) {
+			_, err := io.ReadAll(consumer.connections[0].Conn)
+			if err != nil {
+				p.errChan <- err
+			}
+			log.Print("killling the consumer")
+			p.killingConsumer <- consumer
+			for _, connection := range consumer.connections {
+				connection.Conn.Close()
+			}
+		}(p, consumer)
 	}
 	return nil
 }
@@ -106,11 +118,12 @@ func (p *Partition) send(data []byte) {
 }
 
 type topic struct {
-	name          string
-	partition     []Partition
-	Producer      []*Connection
-	nextPartition int
-	cgCounter     map[string]int
+	name                     string
+	partition                []Partition
+	Producer                 []*Connection
+	nextPartition            int
+	cgCounter                map[string]int
+	cgConnectionBoundCounter map[*ConsumerGroup]map[*Connection]int
 	sync.Mutex
 }
 
@@ -128,10 +141,11 @@ func NewTopic(name string, numPartition uint) *topic {
 		part[i] = NewPartition(1024, uint(i+1))
 	}
 	return &topic{
-		name:      name,
-		partition: part,
-		Producer:  make([]*Connection, 1024),
-		cgCounter: make(map[string]int),
+		name:                     name,
+		partition:                part,
+		Producer:                 make([]*Connection, 1024),
+		cgCounter:                make(map[string]int),
+		cgConnectionBoundCounter: make(map[*ConsumerGroup]map[*Connection]int),
 	}
 }
 
@@ -139,18 +153,52 @@ func (t *topic) registerNewConsumer(cg *ConsumerGroup) *topic {
 	if _, ok := t.cgCounter[cg.name]; !ok {
 		t.cgCounter[cg.name] = 0
 	}
+	if _, ok := t.cgConnectionBoundCounter[cg]; !ok {
+		t.cgConnectionBoundCounter[cg] = map[*Connection]int{}
+		t.cgConnectionBoundCounter[cg][cg.connections[0]] = 0
+	}
+	t.cgConnectionBoundCounter[cg][cg.connections[0]]++
 	t.cgCounter[cg.name]++
 	if t.cgCounter[cg.name] > len(t.partition) {
-		log.Warn().Msg("number of consumer instance exceed the topic partition number, some instance would be idle")
-	} else {
-		t.rebalance(cg)
+		log.Info().Msg("number of consumer instance exceed the topic partition number, instance cancelled to join the cluster")
+		for _, connection := range cg.connections {
+			connection.Conn.Close()
+		}
+		return nil
 	}
+	t.rebalance(cg)
 	return t
 }
 
 func (t *topic) registerNewProducer(conn *Connection) *topic {
 	t.Producer = append(t.Producer, conn)
 	return t
+}
+
+func (t *topic) replaceConnection(cg *ConsumerGroup, partition *Partition) {
+	numConsumer := t.cgCounter[cg.name]
+	partitionLength := len(t.partition)
+
+	if numConsumer == 1 {
+		log.Print("num consumer 1 ", numConsumer)
+		for i := 0; i < partitionLength; i++ {
+			t.partition[i].registerNewConsumer(t, cg)
+		}
+		return
+	}
+
+	var minnConn *Connection
+	i := 999999
+	for _, mapConnection := range t.cgConnectionBoundCounter {
+		for connection, counter := range mapConnection {
+			if counter < i {
+				minnConn = connection
+			}
+		}
+	}
+	log.Print("replacing the consumer with ", minnConn)
+	t.cgConnectionBoundCounter[cg][minnConn]++
+	partition.ConsumerGroups[cg.name].connections = []*Connection{minnConn}
 }
 
 func (t *topic) rebalance(cg *ConsumerGroup) {
@@ -164,7 +212,7 @@ func (t *topic) rebalance(cg *ConsumerGroup) {
 	if numConsumer == 1 {
 		log.Print("num consumer 1 ", numConsumer)
 		for i := 0; i < partitionLength; i++ {
-			t.partition[i].registerNewConsumer(cg)
+			t.partition[i].registerNewConsumer(t, cg)
 		}
 		return
 	}
@@ -173,30 +221,19 @@ func (t *topic) rebalance(cg *ConsumerGroup) {
 	consumer := 1
 	for i < partitionLength {
 		candidate := t.partition[i]
-		// for j := i; j < occurance; j++ {
-		// 	log.Print("re-registering ", candidate.ConsumerGroups[cg.name])
-		// 	log.Print("num consumer ", numConsumer, " partitionLength ", partitionLength, " occurance ", occurance)
-		// 	t.partition[j].registerNewConsumer(candidate.ConsumerGroups[cg.name])
-		// 	counter++
-		// 	i++
-		// }
-		log.Print("detect re-register")
 		if consumer == numConsumer {
 			break
 		}
 
 		for j := 0; j < occurance; j++ {
-			log.Print("re-registering ", candidate.ConsumerGroups[cg.name])
-			t.partition[i].registerNewConsumer(candidate.ConsumerGroups[cg.name])
+			t.partition[i].registerNewConsumer(t, candidate.ConsumerGroups[cg.name])
 			i++
 			counter++
 		}
 		consumer++
 	}
-	log.Print("counter num", counter)
 	for counter < partitionLength {
-		log.Print("registring new node ", cg)
-		t.partition[counter].registerNewConsumer(cg)
+		t.partition[counter].registerNewConsumer(t, cg)
 		counter++
 	}
 }

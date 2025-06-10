@@ -30,7 +30,7 @@ func worker(id int) {
 				for err != nil {
 					switch err {
 					case errNoConnectionsAvailable:
-						log.Print("err no connections available")
+						log.Err(errNoConnectionsAvailable)
 						return
 					default:
 						log.Print("error to specific connection, retrying to another node")

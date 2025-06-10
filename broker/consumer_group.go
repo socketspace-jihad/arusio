@@ -32,7 +32,7 @@ func (cg *ConsumerGroup) send(data []byte) error {
 	cg.mtx.Lock()
 	defer cg.mtx.Unlock()
 	if len(cg.connections) == 0 {
-		log.Print("No connections available")
+		log.Err(errNoConnectionsAvailable)
 		return errNoConnectionsAvailable
 	}
 	conn := cg.connections[cg.targetIdx]
@@ -40,7 +40,6 @@ func (cg *ConsumerGroup) send(data []byte) error {
 	var err error
 	_, err = conn.Conn.Write(data)
 	if err != nil {
-		log.Print(err)
 		conn.Conn.Close()
 		cg.connections = append(cg.connections[:cg.targetIdx], cg.connections[cg.targetIdx+1:]...)
 		if len(cg.connections) == 0 {
