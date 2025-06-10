@@ -15,10 +15,3 @@ func NewConnectionPool(conn *Connection, topicName string) *ConnectionPool {
 		topicName:      topicName,
 	}
 }
-
-func (cp *ConnectionPool) add(conn *Connection, consumerGroup string, connPool *ConnectionPool) {
-	if _, ok := cp.consumerGroups[consumerGroup]; !ok {
-		cp.consumerGroups[consumerGroup] = NewConsumerGroup(consumerGroup)
-	}
-	cp.consumerGroups[consumerGroup].add(conn, connPool)
-}

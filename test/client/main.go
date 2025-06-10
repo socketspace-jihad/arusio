@@ -44,13 +44,9 @@ func main() {
 			PayloadLength: uint64(len(text)),
 		}
 		log.Print("sending", msg)
-		topicLength := len(msg.Topic)
-
-		msgBuff := make([]byte, 4+topicLength+8+len(msg.Payload))
-		binary.BigEndian.PutUint32(msgBuff[:4], uint32(topicLength))
-		copy(msgBuff[4:4+topicLength], msg.Topic)
-		binary.BigEndian.PutUint64(msgBuff[4+topicLength:4+topicLength+8], uint64(len(text)))
-		copy(msgBuff[4+topicLength+8:], msg.Payload)
+		msgBuff := make([]byte, 8+len(msg.Payload))
+		binary.BigEndian.PutUint64(msgBuff[:8], uint64(len(text)))
+		copy(msgBuff[8:], msg.Payload)
 		_, err = conn.Write(msgBuff)
 
 		if err != nil {

@@ -80,7 +80,7 @@ func handle(conn net.Conn) {
 
 	log.Info().Str("consumer_group", string(consumerGroup)).Str("topic", string(topic)).Msg("registering new connections")
 
-	registerConsumers(string(topic), string(consumerGroup), NewConnection(conn))
+	RegisterConsumertoTopic(NewConsumerGroup(string(consumerGroup), conn), string(topic))
 }
 
 func Serve(addr string) {

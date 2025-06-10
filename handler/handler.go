@@ -9,7 +9,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/socketspace-jihad/arusio/broker"
-	"github.com/socketspace-jihad/arusio/message"
 )
 
 var (
@@ -44,28 +43,12 @@ func handle(conn *broker.Connection, id int) {
 	}
 
 	log.Print("producer registered to topic ", string(topic))
-	broker.RegisterProducertoTopic(broker.NewConnection(conn.Conn), string(topic))
+	topicConnection, err := broker.RegisterProducertoTopic(broker.NewConnection(conn.Conn), string(topic))
+	if err != nil {
+		log.Err(err).Msg("error when registering producer to topic")
+	}
 
 	for {
-		// Read topic length (4 bytes)
-		if _, err := io.ReadFull(conn.Reader, topicLenBuf[:]); err != nil {
-			log.Err(errReadLengthBuff)
-			return
-		}
-		topicLen := binary.BigEndian.Uint32(topicLenBuf[:])
-
-		// Guard against unreasonable topic length
-		if topicLen == 0 || topicLen > 1<<20 {
-			log.Err(errReadLengthBuff)
-			return
-		}
-
-		topic := make([]byte, topicLen)
-		if _, err := io.ReadFull(conn.Reader, topic); err != nil {
-			log.Err(errReadLengthBuff)
-			return
-		}
-
 		if _, err := io.ReadFull(conn.Reader, payloadLenBuf[:]); err != nil {
 			log.Err(errReadLengthBuff)
 			return
@@ -83,15 +66,11 @@ func handle(conn *broker.Connection, id int) {
 			return
 		}
 
-		msg := &message.Message{
-			Topic:         topic,
-			Payload:       payload,
-			TopicLength:   topicLen,
-			PayloadLength: payloadLen,
-		}
-		if err := broker.Publish(msg); err != nil {
-			log.Err(err).Int("worker_id", id).Msg("error sending message")
-			return
+		data := make([]byte, 8+payloadLen)
+		copy(data[:8], payloadLenBuf[:])
+		copy(data[8:], payload)
+		if err := topicConnection.Publish(data); err != nil {
+			log.Err(err).Int("worker_id", id).Msg("error when publishing message")
 		}
 	}
 }

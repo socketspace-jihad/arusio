@@ -2,7 +2,7 @@ package broker
 
 import (
 	"errors"
-	"io"
+	"net"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -20,34 +20,12 @@ type ConsumerGroup struct {
 	*ConnectionPool
 }
 
-func NewConsumerGroup(name string) *ConsumerGroup {
+func NewConsumerGroup(name string, connection net.Conn) *ConsumerGroup {
 	return &ConsumerGroup{
-		connections: []*Connection{},
+		connections: []*Connection{NewConnection(connection)},
 		mtx:         sync.Mutex{},
 		name:        name,
 	}
-}
-
-func (cg *ConsumerGroup) add(conn *Connection, connPool *ConnectionPool) {
-	cg.mtx.Lock()
-	cg.connections = append(cg.connections, conn)
-	go func(cg *ConsumerGroup) {
-		_, err := io.ReadAll(conn.Reader)
-		cg.mtx.Lock()
-		defer cg.mtx.Unlock()
-		if err != nil {
-			log.Err(err).Msg("error when reading heartbeat from client ..")
-		}
-		conn.Conn.Close()
-		cg.connections = append(cg.connections[:cg.targetIdx], cg.connections[cg.targetIdx+1:]...)
-		if len(cg.connections) == 0 {
-			delete(consumerPool[connPool.topicName].consumerGroups, cg.name)
-			cg.targetIdx = 0
-			return
-		}
-		cg.targetIdx = (cg.targetIdx + 1) % len(cg.connections)
-	}(cg)
-	cg.mtx.Unlock()
 }
 
 func (cg *ConsumerGroup) send(data []byte) error {
