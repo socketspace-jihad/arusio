@@ -5,6 +5,7 @@ go 1.24.3
 require github.com/rs/zerolog v1.34.0
 
 require (
+	github.com/alitto/pond/v2 v2.3.4 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect

@@ -39,7 +39,7 @@ func main() {
 
 		msg := &message.Message{
 			Topic:         topic,
-			Payload:       []byte(text),
+			Payload:       text,
 			TopicLength:   uint32(topicLength),
 			PayloadLength: uint64(len(text)),
 		}

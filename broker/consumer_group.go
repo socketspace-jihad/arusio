@@ -1,53 +1,72 @@
 package broker
 
 import (
-	"errors"
-	"net"
+	"io"
 	"sync"
 
 	"github.com/rs/zerolog/log"
 )
 
-var (
-	errNoConnectionsAvailable error = errors.New("no connection available")
-)
-
 type ConsumerGroup struct {
-	connections []*Connection
-	mtx         sync.Mutex
-	targetIdx   int
-	name        string
-	*ConnectionPool
+	consumers   []*Consumer
+	partitions  []*Partition
+	assignments map[*Partition]*Consumer
+	mu          sync.Mutex
 }
 
-func NewConsumerGroup(name string, connection net.Conn) *ConsumerGroup {
+func NewConsumerGroup(partitions []*Partition) *ConsumerGroup {
 	return &ConsumerGroup{
-		connections: []*Connection{NewConnection(connection)},
-		mtx:         sync.Mutex{},
-		name:        name,
+		consumers:   make([]*Consumer, 0),
+		partitions:  partitions,
+		assignments: make(map[*Partition]*Consumer),
+		mu:          sync.Mutex{},
 	}
 }
 
-func (cg *ConsumerGroup) send(data []byte) error {
-	cg.mtx.Lock()
-	defer cg.mtx.Unlock()
-	if len(cg.connections) == 0 {
-		log.Err(errNoConnectionsAvailable)
-		return errNoConnectionsAvailable
-	}
-	conn := cg.connections[cg.targetIdx]
+func (cg *ConsumerGroup) AddConsumer(c *Consumer) {
+	cg.mu.Lock()
+	defer cg.mu.Unlock()
 
-	var err error
-	_, err = conn.Conn.Write(data)
-	if err != nil {
-		conn.Conn.Close()
-		cg.connections = append(cg.connections[:cg.targetIdx], cg.connections[cg.targetIdx+1:]...)
-		if len(cg.connections) == 0 {
-			delete(consumerPool[cg.ConnectionPool.topicName].consumerGroups, cg.name)
-			cg.targetIdx = 0
-			return err
+	cg.consumers = append(cg.consumers, c)
+	cg.rebalance()
+}
+
+func (cg *ConsumerGroup) RemoveConsumer(c *Consumer) {
+	cg.mu.Lock()
+	defer cg.mu.Unlock()
+
+	newList := make([]*Consumer, 0, len(cg.consumers)-1)
+	for _, cons := range cg.consumers {
+		if cons != c {
+			newList = append(newList, cons)
+		} else {
+			cons.closeConsumer <- struct{}{}
 		}
 	}
-	cg.targetIdx = (cg.targetIdx + 1) % len(cg.connections)
-	return err
+	cg.consumers = newList
+	cg.rebalance()
+}
+
+func (cg *ConsumerGroup) rebalance() {
+	if len(cg.consumers) == 0 {
+		return
+	}
+	for i, partition := range cg.partitions {
+		consumer := cg.consumers[i%len(cg.consumers)]
+		cg.assignments[partition] = consumer
+		consumer.assignPartition <- partition
+	}
+}
+
+func (cg *ConsumerGroup) MonitorConsumer() {
+	for _, consumer := range cg.consumers {
+		go func(consumer *Consumer) {
+			_, err := io.ReadAll(consumer.connections.conn)
+			if err != nil {
+				log.Err(err)
+			}
+			cg.RemoveConsumer(consumer)
+			cg.rebalance()
+		}(consumer)
+	}
 }

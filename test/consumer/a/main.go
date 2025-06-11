@@ -45,8 +45,8 @@ func main() {
 				break
 			}
 		}
-
 		payloadLength := binary.BigEndian.Uint64(payload)
+		log.Print("payload length", payloadLength)
 		data := make([]byte, payloadLength)
 		_, err = io.ReadFull(conn, data)
 		if err != nil {
