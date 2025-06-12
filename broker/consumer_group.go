@@ -1,7 +1,6 @@
 package broker
 
 import (
-	"io"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -53,20 +52,16 @@ func (cg *ConsumerGroup) rebalance() {
 	}
 	for i, partition := range cg.partitions {
 		consumer := cg.consumers[i%len(cg.consumers)]
+		log.Info().Str("consumer_id", consumer.ID).Uint("partition_id", partition.ID).Msg("(re)assign  consumer to partition")
+		if cg.assignments[partition] == nil {
+			cg.assignments[partition] = consumer
+		}
+		if cg.assignments[partition] != consumer {
+			cg.assignments[partition].quitPartition[partition.ID] <- struct{}{}
+		}
 		cg.assignments[partition] = consumer
-		consumer.assignPartition <- partition
+		cg.assignments[partition].assignPartition <- partition
 	}
-}
-
-func (cg *ConsumerGroup) MonitorConsumer() {
-	for _, consumer := range cg.consumers {
-		go func(consumer *Consumer) {
-			_, err := io.ReadAll(consumer.connections.conn)
-			if err != nil {
-				log.Err(err)
-			}
-			cg.RemoveConsumer(consumer)
-			cg.rebalance()
-		}(consumer)
-	}
+	log.Print("current listener", cg.assignments)
+	log.Print("finish rebalancing")
 }

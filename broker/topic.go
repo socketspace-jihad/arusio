@@ -16,7 +16,7 @@ type Topic struct {
 
 func NewTopic(id uint, name string, numPartition int) *Topic {
 	partitions := []*Partition{}
-	for i := 0; i < 3; i++ {
+	for i := 0; i < numPartition; i++ {
 		partitions = append(partitions, NewPartition(uint(i), 1000))
 	}
 	return &Topic{

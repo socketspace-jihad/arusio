@@ -56,14 +56,16 @@ func handle(conn net.Conn) {
 		return
 	}
 
-	_, ok := ConsumerGroupPool[string(consumerGroup)]
+	consumerGroupStr := string(consumerGroup)
+
+	_, ok := ConsumerGroupPool[consumerGroupStr]
 	if !ok {
-		ConsumerGroupPool[string(consumerGroup)] = NewConsumerGroup(TopicPool[string(topic)].partitions)
-		go ConsumerGroupPool[string(consumerGroup)].MonitorConsumer()
+		ConsumerGroupPool[consumerGroupStr] = NewConsumerGroup(TopicPool[string(topic)].partitions)
 	}
 	c := NewConsumer(conn.RemoteAddr().String(), NewConnection(conn))
 	go c.Consume()
-	ConsumerGroupPool[string(consumerGroup)].AddConsumer(c)
+	go c.MonitorConsumer(ConsumerGroupPool[consumerGroupStr])
+	ConsumerGroupPool[consumerGroupStr].AddConsumer(c)
 }
 
 func Serve(addr string) {

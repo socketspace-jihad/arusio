@@ -54,6 +54,7 @@ func handle(conn net.Conn) {
 			return
 		}
 		payloadLen := binary.BigEndian.Uint64(payloadLenBuf[:])
+		log.Print("length of payload ", payloadLen)
 
 		if payloadLen == 0 || payloadLen > 1<<30 {
 			log.Err(errReadLengthBuff)
@@ -65,10 +66,12 @@ func handle(conn net.Conn) {
 			log.Err(errReadLengthBuff)
 			return
 		}
+		log.Print("payload ", string(payload), " with bytes ", payload)
 
 		data := make([]byte, 8+payloadLen)
 		copy(data[:8], payloadLenBuf[:])
 		copy(data[8:], payload)
+		log.Print("sending data to consumer", data)
 		p.Send(data)
 	}
 }

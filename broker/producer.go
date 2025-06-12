@@ -2,6 +2,7 @@ package broker
 
 import (
 	"errors"
+	"log"
 )
 
 var (
@@ -30,8 +31,11 @@ func NewProducer(conn *Connection) *Producer {
 func (p *Producer) Send(data []byte) {
 	for _, topics := range ProducerToTopic {
 		for _, t := range topics {
-			t.partitions[t.nextPartition].Data <- data
-			t.nextPartition = (t.nextPartition + 1) % len(t.partitions)
+			go func(t *Topic) {
+				log.Print("sending data to partition ", t.partitions[t.nextPartition].ID, string(data[8:]))
+				t.partitions[t.nextPartition].Data <- data
+				t.nextPartition = (t.nextPartition + 1) % len(t.partitions)
+			}(t)
 		}
 	}
 }
